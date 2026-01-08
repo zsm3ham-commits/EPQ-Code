@@ -1,10 +1,6 @@
 
 #include <Wire.h>
 #include <VL53L1X.h>
-const uint8_t sensorCount = 2;
-const uint8_t xshutPins[sensorCount] = {3, 5};
-VL53L1X sensors[sensorCount];
-
 void setup()
 {
   while (!Serial) {}
