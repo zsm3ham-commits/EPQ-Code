@@ -1,0 +1,141 @@
+#include <Wire.h>
+#include <VL53L1X.h>
+#include <Adafruit_DRV2605.h>
+
+#define TCA_ADDR 0x70
+#define NUM_SENSORS 8
+
+// Create arrays of sensor and driver objects
+VL53L1X sensors[NUM_SENSORS];
+Adafruit_DRV2605 drvs[NUM_SENSORS];
+
+void tcaSelect(uint8_t bus)
+{
+  if (bus > 7) return;
+
+  Wire.beginTransmission(TCA_ADDR);
+  Wire.write(1 << bus);
+  Wire.endTransmission();
+  delayMicroseconds(100); // Small delay for I2C to stabilize
+}
+
+void setup()
+{
+  Wire.begin();
+  Serial.begin(9600);
+
+  delay(100);
+  Serial.println("=== STARTING DIAGNOSTIC TEST ===");
+
+  for (uint8_t i = 0; i < NUM_SENSORS; i++)
+  {
+    tcaSelect(i);
+    Serial.print("\n--- Testing Channel ");
+    Serial.print(i);
+    Serial.println(" ---");
+
+    // Test sensor
+    sensors[i].setTimeout(50);
+    if (!sensors[i].init())
+    {
+      Serial.println("  [FAIL] Sensor not detected");
+    }
+    else
+    {
+      sensors[i].startContinuous(50);
+      Serial.println("  [OK] Sensor initialized");
+    }
+
+    // Test DRV2605
+    if (!drvs[i].begin())
+    {
+      Serial.println("  [FAIL] DRV2605 not detected");
+    }
+    else
+    {
+      Serial.println("  [OK] DRV2605 detected");
+      
+      // Read status register
+      uint8_t status = drvs[i].readRegister8(0x00);
+      Serial.print("  Status register: 0x");
+      Serial.println(status, HEX);
+      
+      drvs[i].setMode(DRV2605_MODE_REALTIME);
+      Serial.println("  [OK] Set to realtime mode");
+      
+      // Test vibration at maximum strength
+      Serial.println("  Testing vibration for 2 seconds at MAX...");
+      for (int j = 0; j < 20; j++) {
+        drvs[i].setRealtimeValue(0x7F); // Maximum
+        delay(100);
+      }
+      drvs[i].setRealtimeValue(0x00);
+      Serial.println("  Vibration test complete");
+    }
+    
+    delay(500);
+  }
+
+  Serial.println("\n=== DIAGNOSTIC COMPLETE ===");
+  Serial.println("Did you feel vibrations during the test?");
+  Serial.println("Starting normal operation in 3 seconds...\n");
+  delay(3000);
+}
+
+void loop()
+{
+  static unsigned long lastPrint = 0;
+
+  for (uint8_t i = 0; i < NUM_SENSORS; i++)
+  {
+    tcaSelect(i);
+
+    uint16_t distance = sensors[i].read();
+
+    if (sensors[i].timeoutOccurred())
+    {
+      drvs[i].setRealtimeValue(0x00);
+      delay(10); // Small delay after setting value
+    }
+    else
+    {
+      // Set vibration based on distance
+      if (distance <= 4000)
+      {
+        drvs[i].setRealtimeValue(0x7F); // Maximum strength for testing
+        delay(10);
+        drvs[i].setRealtimeValue(0x00); // Small delay after setting value
+      }
+      else
+      {
+        drvs[i].setRealtimeValue(0x00);
+        delay(10); // Small delay after setting value
+      }
+    }
+  }
+
+  // Print status every 500ms
+  if (millis() - lastPrint >= 500)
+  {
+    for (uint8_t i = 0; i < NUM_SENSORS; i++)
+    {
+      tcaSelect(i);
+      uint16_t distance = sensors[i].read();
+
+      if (!sensors[i].timeoutOccurred())
+      {
+        Serial.print("Ch");
+        Serial.print(i);
+        Serial.print(": ");
+        Serial.print(distance);
+        Serial.print("mm");
+        if (distance <= 4000) {
+          Serial.print(" [VIBRATING]");
+        }
+        Serial.println();
+      }
+    }
+    Serial.println("---");
+    lastPrint = millis();
+  }
+}
